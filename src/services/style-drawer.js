@@ -1,0 +1,212 @@
+const STRING_ONLY_PROPS = ['fontWeight'];
+const NUMBER_ONLY_PROPS = [
+  'padding',
+  'marginTop',
+  'marginBottom',
+  'marginLeft',
+  'marginRight',
+  'marginVertical',
+  'marginHorizontal',
+  'fontSize',
+  'borderWidth',
+  'borderRadius',
+];
+
+const getStylePropOrDefault = (
+  styleProps,
+  styleSheetKey,
+  stylePropKey,
+  defaultValue
+) => {
+  let value = styleProps[stylePropKey];
+  if (NUMBER_ONLY_PROPS.includes(styleSheetKey)) {
+    value = parseFloat(value);
+    if (isNaN(value)) {
+      value = defaultValue;
+    }
+  } else {
+    value = value;
+  }
+  if (value === undefined && defaultValue !== undefined) {
+    value = defaultValue;
+  }
+  if (value === undefined) {
+    return {};
+  }
+  if (STRING_ONLY_PROPS.includes(styleSheetKey)) {
+    value = `${value}`;
+  } else {
+    value = value;
+    if (/^\d+$/.test(value)) {
+      value = parseFloat(value);
+    }
+  }
+  return {
+    [styleSheetKey]: value,
+  };
+};
+
+export const getBodyStyles = (styleProps) => ({
+  bodyWrapper: {
+    ...getStylePropOrDefault(styleProps, 'fontFamily', TyroPayStylePropKeys.fontFamily, undefined),
+    ...getStylePropOrDefault(styleProps, 'backgroundColor', TyroPayStylePropKeys.bodyBackgroundColor, 'white'),
+    flex: 1,
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bodyContainer: {
+    ...getStylePropOrDefault(styleProps, 'padding', TyroPayStylePropKeys.bodyPadding, 0),
+    ...getStylePropOrDefault(styleProps, 'width', TyroPayStylePropKeys.bodyWidth, '100%'),
+    ...getStylePropOrDefault(styleProps, 'minWidth', TyroPayStylePropKeys.bodyMinWidth, 200),
+    ...getStylePropOrDefault(styleProps, 'maxWidth', TyroPayStylePropKeys.bodyMaxWidth, undefined),
+  },
+});
+
+export const getFormStyles = (styleProps) => ({
+  fieldSplit: {
+    display: 'flex',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  fieldSplitSpacer: {
+    padding: 5,
+  },
+});
+
+const DEFAULT_INPUT_SPACING = 10;
+
+export const getInputStyles = (styleProps, { isError, isFocus }) => ({
+  fieldContainer: {
+    display: 'flex',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    flexGrow: 1,
+  },
+  fieldWrapper: {
+    flex: 1,
+    ...(styleProps.showErrorSpacing === false
+      ? getStylePropOrDefault(styleProps, 'marginBottom', TyroPayStylePropKeys.inputSpacing, DEFAULT_INPUT_SPACING)
+      : {}),
+  },
+  inputWrapper: {
+    ...getStylePropOrDefault(styleProps, 'backgroundColor', TyroPayStylePropKeys.inputBackgroundColor, '#f9f9f9'),
+    ...(isFocus &&
+      getStylePropOrDefault(styleProps, 'backgroundColor', TyroPayStylePropKeys.inputFocusBackgroundColor, undefined)),
+    ...(isFocus
+      ? getStylePropOrDefault(styleProps, 'borderWidth', TyroPayStylePropKeys.inputFocusBorderSize, 1)
+      : isError
+      ? getStylePropOrDefault(styleProps, 'borderWidth', TyroPayStylePropKeys.inputErrorBorderSize, 1)
+      : getStylePropOrDefault(styleProps, 'borderWidth', TyroPayStylePropKeys.inputBorderSize, 1)),
+    ...(isFocus
+      ? getStylePropOrDefault(styleProps, 'borderColor', TyroPayStylePropKeys.inputFocusBorderColor, 'blue')
+      : isError
+      ? getStylePropOrDefault(styleProps, 'borderColor', TyroPayStylePropKeys.inputErrorBorderColor, 'red')
+      : getStylePropOrDefault(styleProps, 'borderColor', TyroPayStylePropKeys.inputBorderColor, '#d9d9d9')),
+    ...getStylePropOrDefault(styleProps, 'borderRadius', TyroPayStylePropKeys.inputBorderRadius, 5),
+    width: 'auto',
+  },
+  textInput: {
+    ...getStylePropOrDefault(styleProps, 'fontFamily', TyroPayStylePropKeys.fontFamily, undefined),
+    ...getStylePropOrDefault(styleProps, 'fontSize', TyroPayStylePropKeys.inputFontSize, 15),
+    ...getStylePropOrDefault(styleProps, 'fontWeight', TyroPayStylePropKeys.inputFontWeight, undefined),
+    ...getStylePropOrDefault(styleProps, 'color', TyroPayStylePropKeys.inputFontColor, '#303030'),
+    ...(isFocus
+      ? getStylePropOrDefault(styleProps, 'color', TyroPayStylePropKeys.inputFocusFontColor, undefined)
+      : isError
+      ? getStylePropOrDefault(styleProps, 'color', TyroPayStylePropKeys.inputErrorFontColor, undefined)
+      : undefined),
+    ...getStylePropOrDefault(styleProps, 'padding', TyroPayStylePropKeys.inputPadding, DEFAULT_INPUT_SPACING),
+    width: '100%',
+    height: '100%',
+    flex: 1,
+  },
+  placeholder: {
+    ...getStylePropOrDefault(styleProps, 'color', TyroPayStylePropKeys.labelFontColor, '#686868'),
+  },
+  imageWrapper: {
+    display: 'flex',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  image: {
+    ...getStylePropOrDefault(styleProps, 'marginRight', TyroPayStylePropKeys.inputPadding, DEFAULT_INPUT_SPACING),
+  },
+
+  errorSpacer: {
+    ...getStylePropOrDefault(styleProps, 'marginVertical', TyroPayStylePropKeys.inputSpacing, DEFAULT_INPUT_SPACING),
+  },
+  error: {
+    ...getStylePropOrDefault(styleProps, 'fontFamily', TyroPayStylePropKeys.fontFamily, undefined),
+    ...getStylePropOrDefault(styleProps, 'fontSize', TyroPayStylePropKeys.errorFontSize, 15),
+    ...getStylePropOrDefault(styleProps, 'fontWeight', TyroPayStylePropKeys.errorFontWeight, undefined),
+    ...getStylePropOrDefault(styleProps, 'color', TyroPayStylePropKeys.errorFontColor, 'red'),
+    ...getStylePropOrDefault(styleProps, 'backgroundColor', TyroPayStylePropKeys.errorBackgroundColor, undefined),
+    ...getStylePropOrDefault(styleProps, 'padding', TyroPayStylePropKeys.errorPadding, undefined),
+    ...getStylePropOrDefault(styleProps, 'marginVertical', TyroPayStylePropKeys.inputSpacing, DEFAULT_INPUT_SPACING),
+  },
+
+  labelContainer: {
+    ...getStylePropOrDefault(styleProps, 'color', TyroPayStylePropKeys.labelFontColor, '#303030'),
+    ...getStylePropOrDefault(styleProps, 'fontFamily', TyroPayStylePropKeys.fontFamily, undefined),
+    ...getStylePropOrDefault(styleProps, 'fontSize', TyroPayStylePropKeys.labelFontSize, 15),
+    ...getStylePropOrDefault(styleProps, 'fontWeight', TyroPayStylePropKeys.labelFontWeight, '600'),
+    ...getStylePropOrDefault(styleProps, 'padding', TyroPayStylePropKeys.labelPadding, 10),
+    width: '100%',
+  },
+});
+
+export const getDividerStyles = (styleProps) => ({
+  dividerWrapper: { flexDirection: 'row', alignItems: 'center', margin: 10, marginBottom: 20 },
+  text: {
+    ...getStylePropOrDefault(styleProps, 'fontFamily', TyroPayStylePropKeys.fontFamily, undefined),
+    fontSize: 15,
+    paddingLeft: 5,
+    paddingRight: 5,
+    textAlign: 'center',
+    ...getStylePropOrDefault(styleProps, 'color', TyroPayStylePropKeys.labelFontColor, '#303030'),
+  },
+  line: {
+    flex: 1,
+    height: 1,
+    ...getStylePropOrDefault(styleProps, 'backgroundColor', TyroPayStylePropKeys.inputBorderColor, '#d9d9d9'),
+  },
+});
+
+export const getWalletPaymentsStyles = (styleProps) => ({
+  walletWrapper: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    ...getStylePropOrDefault(styleProps, 'marginBottom', TyroPayStylePropKeys.inputSpacing, DEFAULT_INPUT_SPACING),
+  },
+  walletPadder: {
+    ...getStylePropOrDefault(styleProps, 'padding', TyroPayStylePropKeys.walletPaymentsButtonsMargin, 0),
+    width: '100%',
+  },
+  walletContainer: {
+    ...getStylePropOrDefault(styleProps, 'width', TyroPayStylePropKeys.walletPaymentsButtonsWidth, '100%'),
+    height: 48,
+    minWidth: 90,
+  },
+});
+
+export const getPayButtonStyles = (styleProps) => ({
+  container: {
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginVertical: 10,
+  },
+  button: {
+    borderRadius: 5,
+    height: 40,
+    width: '100%',
+    backgroundColor: 'blue',
+  },
+  buttonText: {
+    ...getStylePropOrDefault(styleProps, 'fontFamily', TyroPayStylePropKeys.fontFamily, undefined),
+    color: 'white',
+  },
+});

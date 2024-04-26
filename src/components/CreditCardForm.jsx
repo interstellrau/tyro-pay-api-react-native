@@ -1,0 +1,179 @@
+import React, { useEffect, useRef, useState } from 'react';
+import { Platform, StyleSheet, TextInput, View } from 'react-native';
+import {
+  buildCardExpiry,
+  formatCardCVC,
+  formatCardExpiry,
+  formatCardNumber,
+  getCardType,
+  UNKNOWN_CARD_TYPE,
+} from '../utils/card-formatting';
+import { eventType, validateInput } from '../utils/validators';
+import InputField from './InputField';
+import { CardImageNames } from '../@types/card-types';
+import { getFormStyles } from '../services/style-drawer';
+import { useSDK } from '../SDKSharedContext';
+import { useTyro } from '../TyroSharedContext';
+
+const completedStatuses = ['FAILED', 'SUCCESS', 'VOIDED'];
+
+export const CreditCardForm = ({ validationErrors, setValidationErrors }) => {
+  const { options, supportedNetworks, setCardDetails } = useSDK();
+  const { payRequest } = useTyro();
+  const [cardType, setCardType] = useState(UNKNOWN_CARD_TYPE.type);
+  const [number, setNumber] = useState('');
+  const [name, setName] = useState('');
+  const [expiry, setExpiry] = useState('');
+  const [securityCode, setSecurityCode] = useState('');
+
+  useEffect(() => {
+    setCardDetails({
+      nameOnCard: name,
+      number: number.replaceAll(' ', ''),
+      expiry: buildCardExpiry(expiry),
+      securityCode,
+    });
+  }, [name, number, expiry, securityCode]);
+
+  useEffect(() => {
+    if (payRequest?.status && completedStatuses.includes(payRequest.status)) {
+      setCardType(UNKNOWN_CARD_TYPE.type);
+      setNumber('');
+      setName('');
+      setExpiry('');
+      setSecurityCode('');
+    }
+  }, [payRequest]);
+
+  useEffect(() => {
+    if (!(number || validationErrors.card_number)) {
+      if (options?.styleProps?.showSupportedCards === false) {
+        setCardType(UNKNOWN_CARD_TYPE.type);
+        return;
+      }
+      setCardType(CardImageNames.PREVIEW);
+      return;
+    }
+
+    const cardTypeName = String(getCardType(number, supportedNetworks)?.type);
+    setCardType(cardTypeName);
+  }, [number, supportedNetworks]);
+
+  const styles = StyleSheet.create({
+    ...getFormStyles(options.styleProps),
+  });
+
+  const onChangeNumber = (text) => {
+    const formatted = formatCardNumber(text);
+    validateInput(eventType.CHANGE, 'card_number', text, cardType, validationErrors, setValidationErrors);
+    setNumber(formatted);
+  };
+
+  const onChangeName = (text) => {
+    validateInput(eventType.CHANGE, 'card_name', text, cardType, validationErrors, setValidationErrors);
+    setName(text);
+  };
+
+  const onChangeExpiry = (text) => {
+    const formatted = formatCardExpiry(text);
+    validateInput(eventType.CHANGE, 'card_expiry', formatted, cardType, validationErrors, setValidationErrors);
+    setExpiry(formatted);
+  };
+
+  const onChangeCVV = (text) => {
+    const formatted = formatCardCVC(text);
+    validateInput(eventType.CHANGE, 'card_cvv', text, cardType, validationErrors, setValidationErrors);
+    setSecurityCode(formatted);
+  };
+
+  const fieldRefs = {
+    refName: useRef(null),
+    refExpiry: useRef(null),
+    refCvv: useRef(null),
+  };
+
+  const focusNextField = (nextField) => {
+    fieldRefs[nextField].current.focus();
+  };
+
+  return (
+    <View>
+      <InputField
+        labelText="Card number"
+        placeholderText="Card number"
+        setText={onChangeNumber}
+        value={number}
+        maxLength={19}
+        keyboardType="numeric"
+        img={
+          validationErrors.card_number
+            ? CardImageNames.ERROR
+            : cardType !== CardImageNames.PREVIEW
+            ? cardType
+            : CardImageNames.PREVIEW
+        }
+        error={validationErrors.card_number}
+        validator={(event) => {
+          validateInput(event, 'card_number', number, cardType, validationErrors, setValidationErrors);
+        }}
+        returnKeyType={Platform.OS === 'ios' ? 'done' : 'next'}
+        onSubmitEditing={() => focusNextField('refName')}
+        blurOnSubmit={false}
+      />
+      <InputField
+        labelText="Name on card"
+        placeholderText="Name on card"
+        setText={onChangeName}
+        value={name}
+        maxLength={50}
+        keyboardType="default"
+        img={null}
+        error={validationErrors.card_name}
+        validator={(event) => {
+          validateInput(event, 'card_name', name, cardType, validationErrors, setValidationErrors);
+        }}
+        returnKeyType="next"
+        ref={fieldRefs.refName}
+        onSubmitEditing={() => focusNextField('refExpiry')}
+        blurOnSubmit={false}
+      />
+      <View style={styles.fieldSplit}>
+        <InputField
+          labelText="Expiry (MM/YY)"
+          placeholderText="MM/YY"
+          setText={onChangeExpiry}
+          value={expiry}
+          maxLength={5}
+          keyboardType="numeric"
+          img={null}
+          error={validationErrors.card_expiry}
+          validator={(event) => {
+            validateInput(event, 'card_expiry', expiry, cardType, validationErrors, setValidationErrors);
+          }}
+          returnKeyType={Platform.OS === 'ios' ? 'done' : 'next'}
+          ref={fieldRefs.refExpiry}
+          onSubmitEditing={() => focusNextField('refCvv')}
+          blurOnSubmit={false}
+        />
+        <View style={styles.fieldSplitSpacer} />
+        <InputField
+          labelText="Security code"
+          placeholderText="CVV"
+          setText={onChangeCVV}
+          value={securityCode}
+          maxLength={cardType === 'AMEX' ? 4 : 3}
+          keyboardType="numeric"
+          img={validationErrors.card_cvv ? CardImageNames.ERROR : CardImageNames.CVV}
+          error={validationErrors.card_cvv}
+          validator={(event) => {
+            validateInput(event, 'card_cvv', securityCode, cardType, validationErrors, setValidationErrors);
+          }}
+          returnKeyType="done"
+          ref={fieldRefs.refCvv}
+        />
+      </View>
+    </View>
+  );
+};
+
+export default CreditCardForm;
