@@ -120,9 +120,10 @@ export const getInputStyles = (
       ? getStylePropOrDefault(styleProps, 'borderColor', TyroPayStylePropKeys.inputFocusBorderColor, 'blue')
       : isError
       ? getStylePropOrDefault(styleProps, 'borderColor', TyroPayStylePropKeys.inputErrorBorderColor, 'red')
-      : getStylePropOrDefault(styleProps, 'borderColor', TyroPayStylePropKeys.inputBorderColor, '#d9d9d9')),
+      : getStylePropOrDefault(styleProps, 'borderColor', TyroPayStylePropKeys.inputBorderColor, '#c4c4c4')),
     // End conditionals
-    ...getStylePropOrDefault(styleProps, 'borderRadius', TyroPayStylePropKeys.inputBorderRadius, 5),
+    ...getStylePropOrDefault(styleProps, 'borderRadius', TyroPayStylePropKeys.inputBorderRadius, 8),
+    height: 48,
     width: 'auto',
   },
   textInput: {
@@ -136,7 +137,7 @@ export const getInputStyles = (
       : isError
       ? getStylePropOrDefault(styleProps, 'color', TyroPayStylePropKeys.inputErrorFontColor, undefined)
       : undefined),
-    ...getStylePropOrDefault(styleProps, 'padding', TyroPayStylePropKeys.inputPadding, DEFAULT_INPUT_SPACING),
+    ...getStylePropOrDefault(styleProps, 'padding', TyroPayStylePropKeys.inputPadding, 12),
     width: '100%',
     height: 45,
     flex: 1,
@@ -175,18 +176,19 @@ export const getInputStyles = (
     ...getStylePropOrDefault(styleProps, 'fontFamily', TyroPayStylePropKeys.fontFamily, undefined),
     ...getStylePropOrDefault(styleProps, 'fontSize', TyroPayStylePropKeys.labelFontSize, 15),
     ...getStylePropOrDefault(styleProps, 'fontWeight', TyroPayStylePropKeys.labelFontWeight, '600'),
-    ...getStylePropOrDefault(styleProps, 'padding', TyroPayStylePropKeys.labelPadding, 10),
+    paddingHorizontal: 8,
+    paddingVertical: 4,
     width: '100%',
   },
 });
 
 export const getDividerStyles = (styleProps: TyroPayStyleProps): Record<string, any> => ({
-  dividerWrapper: { flexDirection: 'row', alignItems: 'center', margin: 10, marginBottom: 20 },
+  dividerWrapper: { flexDirection: 'row', alignItems: 'center', marginTop: 16, marginBottom: 8 },
   text: {
     ...getStylePropOrDefault(styleProps, 'fontFamily', TyroPayStylePropKeys.fontFamily, undefined),
-    fontSize: 15,
-    paddingLeft: 5,
-    paddingRight: 5,
+    fontSize: 14,
+    paddingLeft: 16,
+    paddingRight: 16,
     textAlign: 'center',
     ...getStylePropOrDefault(styleProps, 'color', TyroPayStylePropKeys.labelFontColor, '#303030'),
   },
