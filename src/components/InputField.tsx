@@ -57,7 +57,7 @@ export const InputField = forwardRef<TextInput, InputFieldProps>(function InputF
             </View>
           )}
           {img === CardImageNames.PREVIEW && (
-            <View style={styles.image}>
+            <View style={[styles.image]}>
               <CardPreview supportedNetworks={supportedNetworks ?? defaultSupportedNetworks} />
             </View>
           )}

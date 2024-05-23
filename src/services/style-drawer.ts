@@ -56,7 +56,6 @@ export const getBodyStyles = (styleProps: TyroPayStyleProps): Record<string, any
   bodyWrapper: {
     ...getStylePropOrDefault(styleProps, 'fontFamily', TyroPayStylePropKeys.fontFamily, undefined),
     ...getStylePropOrDefault(styleProps, 'backgroundColor', TyroPayStylePropKeys.bodyBackgroundColor, 'white'),
-    flex: 1,
     width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
@@ -139,7 +138,7 @@ export const getInputStyles = (
       : undefined),
     ...getStylePropOrDefault(styleProps, 'padding', TyroPayStylePropKeys.inputPadding, DEFAULT_INPUT_SPACING),
     width: '100%',
-    height: '100%',
+    height: 45,
     flex: 1,
   },
   placeholder: {
