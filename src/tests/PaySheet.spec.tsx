@@ -2,12 +2,14 @@ import React from 'react';
 import TyroProvider from '../TyroSharedContext';
 import { NativeModules } from 'react-native';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
-import { ClientPayRequestResponse } from '../@types/pay-request-types';
+import { ClientPayRequestResponse, PayRequestStatus, ThreeDSecureStatus } from '../@types/pay-request-types';
 import { mockFetch } from './utils/mocks';
 import { act } from 'react-test-renderer';
 import { InitTestComponent, TestPayButton, useYear } from './test-components/tests';
 import { CardTypeNames } from '../@types/card-types';
 import { TyroPayOptionsProps, TyroPayStyleLabelPositions } from '../@types/definitions';
+import { ErrorCodes, ErrorMessageType, TyroErrorMessages } from '../@types/error-message-types';
+import { HTTP_ACCEPTED, HTTP_FORBIDDEN, HTTP_OK } from '../@types/http-status-codes';
 
 jest.mock('../clients/config/pay-request-client-config.ts', () => {
   return {
@@ -40,6 +42,10 @@ jest.mock('../@types/images.tsx', () => {
     }, {}),
   };
 });
+
+const merchantIdentifier = 'merId';
+const merchantName = 'merName';
+const cardDeclined = 'Card Declined';
 
 const renderWithProvider = async (component, options: TyroPayOptionsProps): Promise<any> => {
   return render(<TyroProvider options={options}>{component}</TyroProvider>);
@@ -103,40 +109,47 @@ describe('PaySheet', () => {
     describe('Submit Guards - no paysecret and unknown card type', () => {
       test('Pay button will not submit if no paySecret', async () => {
         (global.fetch as jest.Mock).mockResolvedValueOnce(
-          mockFetch(200, {
-            status: 'AWAITING_PAYMENT_INPUT',
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
             isLive: false,
             origin: 'nope',
           } as unknown as ClientPayRequestResponse)
         ); // init and verify paySecret
         await act(async () => {
           await waitFor(async () => {
-            wrapper = await renderWithProvider(<TestPayButton />, { liveMode: false });
+            wrapper = await renderWithProvider(<TestPayButton title={'Pay'} />, { liveMode: false });
           });
           checkForPaySheetRenders(wrapper);
           await fillOutForm(wrapper, '4111111111111111', 'test name', '01' + useYear, '123');
           expect(wrapper.queryByText('Pay')).not.toBeNull();
           expect(wrapper.queryByText('no error')).not.toBeNull();
           await pressButton(wrapper, 'pay-button');
-          expect(wrapper.queryByText('NO_PAY_SECRET: No pay secret provided')).not.toBeNull();
+          expect(
+            wrapper.queryByText(
+              `${TyroErrorMessages.CLIENT_INITIALISATION_ERROR.type}: ${TyroErrorMessages.CLIENT_INITIALISATION_ERROR.message}`
+            )
+          ).not.toBeNull();
         });
       }, 15000);
 
       test('can submit payRequest when supportedNetworks matches frontend and backend', async () => {
         (global.fetch as jest.Mock)
           .mockResolvedValueOnce(
-            mockFetch(200, {
-              status: 'AWAITING_PAYMENT_INPUT',
+            mockFetch(HTTP_OK, {
+              status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
               isLive: false,
               supportedNetworks: [CardTypeNames.VISA],
             } as unknown as ClientPayRequestResponse)
           ) // init and verify paySecret
           .mockResolvedValueOnce(
-            mockFetch(202, { status: 'AWAITING_PAYMENT_INPUT', isLive: false } as ClientPayRequestResponse)
+            mockFetch(HTTP_ACCEPTED, {
+              status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
+              isLive: false,
+            } as ClientPayRequestResponse)
           ) // submitPayRequest
           .mockResolvedValueOnce(
-            mockFetch(200, {
-              status: 'SUCCESS',
+            mockFetch(HTTP_OK, {
+              status: PayRequestStatus.SUCCESS,
               isLive: false,
               origin: '',
               total: {},
@@ -145,7 +158,7 @@ describe('PaySheet', () => {
           ); // pollPayCompletion
         await act(async () => {
           await waitFor(async () => {
-            wrapper = await renderWithProvider(<InitTestComponent />, {
+            wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
               liveMode: false,
               options: { creditCardForm: { supportedNetworks: [CardTypeNames.VISA] } },
               styleProps: { showSupportedCards: false },
@@ -155,7 +168,7 @@ describe('PaySheet', () => {
           checkForPaySheetRenders(wrapper);
           await fillOutForm(wrapper, '4111111111111111', 'test name', '01' + useYear, '123');
           await pressButton(wrapper, 'pay-button');
-          expect(wrapper.getByText('Pay Request Status: SUCCESS')).not.toBeNull();
+          expect(wrapper.getByText(`Pay Request Status: ${PayRequestStatus.SUCCESS}`)).not.toBeNull();
           checkForPaySheetRenders(wrapper);
         });
       }, 15000);
@@ -163,18 +176,21 @@ describe('PaySheet', () => {
       test('cannot submit payRequest when supportedNetworks does not match between frontend and backend', async () => {
         (global.fetch as jest.Mock)
           .mockResolvedValueOnce(
-            mockFetch(200, {
-              status: 'AWAITING_PAYMENT_INPUT',
+            mockFetch(HTTP_OK, {
+              status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
               isLive: false,
               supportedNetworks: [CardTypeNames.MASTERCARD],
             } as unknown as ClientPayRequestResponse)
           ) // init and verify paySecret
           .mockResolvedValueOnce(
-            mockFetch(202, { status: 'AWAITING_PAYMENT_INPUT', isLive: false } as ClientPayRequestResponse)
+            mockFetch(HTTP_ACCEPTED, {
+              status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
+              isLive: false,
+            } as ClientPayRequestResponse)
           ) // submitPayRequest
           .mockResolvedValueOnce(
-            mockFetch(200, {
-              status: 'SUCCESS',
+            mockFetch(HTTP_OK, {
+              status: PayRequestStatus.SUCCESS,
               isLive: false,
               origin: '',
               total: {},
@@ -183,7 +199,7 @@ describe('PaySheet', () => {
           ); // pollPayCompletion
         await act(async () => {
           await waitFor(async () => {
-            wrapper = await renderWithProvider(<InitTestComponent />, {
+            wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
               liveMode: false,
               options: { creditCardForm: { supportedNetworks: [CardTypeNames.VISA] } },
               styleProps: { showSupportedCards: false },
@@ -193,24 +209,24 @@ describe('PaySheet', () => {
           checkForPaySheetRenders(wrapper);
           await fillOutForm(wrapper, '4111111111111111', 'test name', '01' + useYear, '123');
           await pressButton(wrapper, 'pay-button');
-          expect(wrapper.queryByText('Pay Request Status: SUCCESS')).toBeNull();
-          expect(wrapper.getByText('ErrorType: INVALID_CARD_TYPE')).not.toBeNull();
-          expect(wrapper.getByText('ErrorMessage: Card type not supported.')).not.toBeNull();
+          expect(wrapper.queryByText(`Pay Request Status: ${PayRequestStatus.SUCCESS}`)).toBeNull();
+          expect(wrapper.getByText(`ErrorType: ${TyroErrorMessages[ErrorMessageType.CARD_ERROR].type}`)).not.toBeNull();
+          expect(wrapper.getByText(`ErrorCode: ${ErrorCodes.INVALID_CARD_TYPE}`)).not.toBeNull();
           checkForPaySheetRenders(wrapper);
         });
       }, 15000);
 
       test('using a non-supported card type sets tyroError to INVALID_CARD_TYPE', async () => {
         (global.fetch as jest.Mock).mockResolvedValueOnce(
-          mockFetch(200, {
-            status: 'AWAITING_PAYMENT_INPUT',
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
             isLive: false,
             supportedNetworks: [CardTypeNames.VISA],
           } as unknown as ClientPayRequestResponse)
         ); // init and verify paySecret
         await act(async () => {
           await waitFor(async () => {
-            wrapper = await renderWithProvider(<InitTestComponent />, {
+            wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
               liveMode: false,
               options: { creditCardForm: { supportedNetworks: [CardTypeNames.VISA] } },
               styleProps: { showSupportedCards: false },
@@ -220,16 +236,16 @@ describe('PaySheet', () => {
           checkForPaySheetRenders(wrapper);
           await fillOutForm(wrapper, '6759649826438453', 'test name', '01' + useYear, '123');
           await pressButton(wrapper, 'pay-button');
-          expect(wrapper.getByText('ErrorType: INVALID_CARD_TYPE')).not.toBeNull();
-          expect(wrapper.getByText('ErrorMessage: Card type not supported.')).not.toBeNull();
+          expect(wrapper.getByText(`ErrorType: ${TyroErrorMessages[ErrorMessageType.CARD_ERROR].type}`)).not.toBeNull();
+          expect(wrapper.getByText(`ErrorCode: ${ErrorCodes.INVALID_CARD_TYPE}`)).not.toBeNull();
           checkForPaySheetRenders(wrapper);
         });
       }, 15000);
 
       test('cannot submit if form validation fails', async () => {
         (global.fetch as jest.Mock).mockResolvedValueOnce(
-          mockFetch(200, {
-            status: 'AWAITING_PAYMENT_INPUT',
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
             isLive: false,
             supportedNetworks: null,
           } as unknown as ClientPayRequestResponse)
@@ -237,7 +253,7 @@ describe('PaySheet', () => {
 
         await act(async () => {
           await waitFor(async () => {
-            wrapper = await renderWithProvider(<InitTestComponent />, {
+            wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
               liveMode: false,
               options: { creditCardForm: { supportedNetworks: [CardTypeNames.VISA] } },
               styleProps: { showSupportedCards: false },
@@ -247,8 +263,8 @@ describe('PaySheet', () => {
           checkForPaySheetRenders(wrapper);
           await fillOutForm(wrapper, '411111111111', '', '01' + useYear, '');
           await pressButton(wrapper, 'pay-button');
-          wrapper.getByText('ErrorType: INVALID_CARD_DETAILS');
-          wrapper.getByText('ErrorMessage: Invalid card details');
+          wrapper.getByText(`ErrorType: ${TyroErrorMessages[ErrorMessageType.CARD_ERROR].type}`);
+          wrapper.getByText(`ErrorCode: ${ErrorCodes.INVALID_CARD_DETAILS}`);
         });
       }, 15000);
     });
@@ -257,14 +273,20 @@ describe('PaySheet', () => {
     test('can submit payRequest - no 3DS Challenge and success status', async () => {
       (global.fetch as jest.Mock)
         .mockResolvedValueOnce(
-          mockFetch(200, { status: 'AWAITING_PAYMENT_INPUT', isLive: false } as ClientPayRequestResponse)
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
+            isLive: false,
+          } as ClientPayRequestResponse)
         ) // init and verify paySecret
         .mockResolvedValueOnce(
-          mockFetch(202, { status: 'AWAITING_PAYMENT_INPUT', isLive: false } as ClientPayRequestResponse)
+          mockFetch(HTTP_ACCEPTED, {
+            status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
+            isLive: false,
+          } as ClientPayRequestResponse)
         ) // submitPayRequest
         .mockResolvedValueOnce(
-          mockFetch(200, {
-            status: 'SUCCESS',
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.SUCCESS,
             isLive: false,
             origin: '',
             total: {},
@@ -273,7 +295,7 @@ describe('PaySheet', () => {
         ); // pollPayCompletion
       await act(async () => {
         await waitFor(async () => {
-          wrapper = await renderWithProvider(<InitTestComponent />, {
+          wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
             liveMode: false,
             styleProps: { showSupportedCards: false },
           });
@@ -282,7 +304,7 @@ describe('PaySheet', () => {
         checkForPaySheetRenders(wrapper);
         await fillOutForm(wrapper, '4111111111111111', 'test name', '01' + useYear, '123');
         await pressButton(wrapper, 'pay-button');
-        expect(wrapper.getByText('Pay Request Status: SUCCESS')).not.toBeNull();
+        expect(wrapper.getByText(`Pay Request Status: ${PayRequestStatus.SUCCESS}`)).not.toBeNull();
         checkForPaySheetRenders(wrapper);
       });
     }, 15000);
@@ -290,24 +312,30 @@ describe('PaySheet', () => {
     test('can submit payRequest - no 3DS Challenge and failed status', async () => {
       (global.fetch as jest.Mock)
         .mockResolvedValueOnce(
-          mockFetch(200, { status: 'AWAITING_PAYMENT_INPUT', isLive: false } as ClientPayRequestResponse)
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
+            isLive: false,
+          } as ClientPayRequestResponse)
         ) // init and verify paySecret
         .mockResolvedValueOnce(
-          mockFetch(202, { status: 'AWAITING_PAYMENT_INPUT', isLive: false } as ClientPayRequestResponse)
+          mockFetch(HTTP_ACCEPTED, {
+            status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
+            isLive: false,
+          } as ClientPayRequestResponse)
         ) // submitPayRequest
         .mockResolvedValueOnce(
-          mockFetch(200, {
-            status: 'FAILED',
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.FAILED,
             isLive: false,
             origin: '',
             total: {},
             errorMessage: undefined,
-            errorCode: 'DECLINED',
+            errorCode: cardDeclined,
           } as unknown as ClientPayRequestResponse)
         ); // pollPayCompletion
       await act(async () => {
         await waitFor(async () => {
-          wrapper = await renderWithProvider(<InitTestComponent />, {
+          wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
             liveMode: false,
             styleProps: { showSupportedCards: false },
           });
@@ -317,25 +345,32 @@ describe('PaySheet', () => {
         await fillOutForm(wrapper, '4111111111111111', 'test name', '01' + useYear, '123');
         await pressButton(wrapper, 'pay-button');
         // Payment failed
-        expect(wrapper.getByText('Pay Request Status: FAILED')).not.toBeNull();
+        expect(wrapper.getByText(`Pay Request Status: ${PayRequestStatus.FAILED}`)).not.toBeNull();
         // tyroError.errorCode gets set to PAYMENT_FAILED
-        expect(wrapper.getByText('ErrorType: PAYMENT_FAILED')).not.toBeNull();
-        expect(wrapper.getByText('ErrorCode: DECLINED')).not.toBeNull();
-        expect(wrapper.getByText('ErrorMessage: Payment failed')).not.toBeNull();
+        expect(
+          wrapper.getByText(`ErrorType: ${TyroErrorMessages[ErrorMessageType.PAY_REQUEST_ERROR].type}`)
+        ).not.toBeNull();
+        expect(wrapper.getByText(`ErrorCode: ${cardDeclined}`)).not.toBeNull();
       });
     }, 15000);
 
     test('can submit payRequest - no 3DS Challenge and voided status if request was voided immediately before a success status was polled', async () => {
       (global.fetch as jest.Mock)
         .mockResolvedValueOnce(
-          mockFetch(200, { status: 'AWAITING_PAYMENT_INPUT', isLive: false } as ClientPayRequestResponse)
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
+            isLive: false,
+          } as ClientPayRequestResponse)
         ) // init and verify paySecret
         .mockResolvedValueOnce(
-          mockFetch(202, { status: 'AWAITING_PAYMENT_INPUT', isLive: false } as ClientPayRequestResponse)
+          mockFetch(HTTP_ACCEPTED, {
+            status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
+            isLive: false,
+          } as ClientPayRequestResponse)
         ) // submitPayRequest
         .mockResolvedValue(
-          mockFetch(200, {
-            status: 'VOIDED',
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.VOIDED,
             isLive: false,
             origin: '',
             total: {},
@@ -344,7 +379,7 @@ describe('PaySheet', () => {
         ); // pollPayCompletion
       await act(async () => {
         await waitFor(async () => {
-          wrapper = await renderWithProvider(<InitTestComponent />, {
+          wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
             liveMode: false,
             styleProps: { showSupportedCards: false },
           });
@@ -353,22 +388,38 @@ describe('PaySheet', () => {
         checkForPaySheetRenders(wrapper);
         await fillOutForm(wrapper, '4111111111111111', 'test name', '01' + useYear, '123');
         await pressButton(wrapper, 'pay-button');
-        expect(wrapper.getByText('Pay Request Status: VOIDED')).not.toBeNull();
+        expect(wrapper.getByText(`Pay Request Status: ${PayRequestStatus.VOIDED}`)).not.toBeNull();
         // tyroError.errorCode gets set to PAYMENT_FAILED
-        expect(wrapper.getByText('ErrorType: PAYMENT_FAILED')).not.toBeNull();
-        expect(wrapper.getByText('ErrorMessage: Payment failed')).not.toBeNull();
+        expect(
+          wrapper.getByText(`ErrorType: ${TyroErrorMessages[ErrorMessageType.PAY_REQUEST_ERROR].type}`)
+        ).not.toBeNull();
+        expect(
+          wrapper.getByText(`ErrorMessage: ${TyroErrorMessages[ErrorMessageType.PAY_REQUEST_ERROR].message}`)
+        ).not.toBeNull();
       });
     }, 15000);
 
-    test('if submitting the pay request fails, tyroError is set with payment failed', async () => {
+    test('if submitting the pay request fails but polling succeeds, tyroError is set with server error', async () => {
       (global.fetch as jest.Mock)
         .mockResolvedValueOnce(
-          mockFetch(200, { status: 'AWAITING_PAYMENT_INPUT', isLive: false } as ClientPayRequestResponse)
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
+            isLive: false,
+          } as ClientPayRequestResponse)
         ) // init and verify paySecret
-        .mockResolvedValueOnce(mockFetch(500, {} as ClientPayRequestResponse)); // submitPayRequest
+        .mockResolvedValueOnce(mockFetch(500, {} as ClientPayRequestResponse)) // submitPayRequest
+        .mockResolvedValue(
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
+            isLive: false,
+            origin: '',
+            total: {},
+            errorMessage: undefined,
+          } as unknown as ClientPayRequestResponse)
+        ); // pollPayCompletion
       await act(async () => {
         await waitFor(async () => {
-          wrapper = await renderWithProvider(<InitTestComponent />, {
+          wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
             liveMode: false,
             styleProps: { showSupportedCards: false },
           });
@@ -377,23 +428,24 @@ describe('PaySheet', () => {
         checkForPaySheetRenders(wrapper);
         await fillOutForm(wrapper, '4111111111111111', 'test name', '01' + useYear, '123');
         await pressButton(wrapper, 'pay-button');
-        expect(wrapper.getByText('ErrorType: PAYMENT_FAILED')).not.toBeNull();
-        expect(wrapper.getByText('ErrorMessage: Payment failed')).not.toBeNull();
+        expect(wrapper.getByText(`ErrorType: ${TyroErrorMessages[ErrorMessageType.SERVER_ERROR].type}`)).not.toBeNull();
+        expect(wrapper.getByText(`ErrorCode: ${ErrorCodes.FAILED_TO_SUBMIT}`)).not.toBeNull();
       });
     }, 15000);
 
-    test('sets tyroError to Server error if polling the submitted pay request returns a http error code', async () => {
+    test('sets tyroError to server error with the status http status code if polling the submitted pay request also fails', async () => {
       (global.fetch as jest.Mock)
         .mockResolvedValueOnce(
-          mockFetch(200, { status: 'AWAITING_PAYMENT_INPUT', isLive: false } as ClientPayRequestResponse)
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
+            isLive: false,
+          } as ClientPayRequestResponse)
         ) // init and verify paySecret
-        .mockResolvedValueOnce(
-          mockFetch(202, { status: 'AWAITING_PAYMENT_INPUT', isLive: false } as ClientPayRequestResponse)
-        ) // submitPayRequest
-        .mockResolvedValueOnce(mockFetch(400, {} as unknown as ClientPayRequestResponse)); // pollPayCompletion
+        .mockResolvedValueOnce(mockFetch(503, {} as ClientPayRequestResponse)) // submitPayRequest
+        .mockResolvedValueOnce(null); // pollPayCompletion
       await act(async () => {
         await waitFor(async () => {
-          wrapper = await renderWithProvider(<InitTestComponent />, {
+          wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
             liveMode: false,
             styleProps: { showSupportedCards: false },
           });
@@ -402,21 +454,30 @@ describe('PaySheet', () => {
         checkForPaySheetRenders(wrapper);
         await fillOutForm(wrapper, '4111111111111111', 'test name', '01' + useYear, '123');
         await pressButton(wrapper, 'pay-button');
-        expect(wrapper.getByText('ErrorType: SERVER_ERROR')).not.toBeNull();
-        expect(wrapper.getByText('ErrorMessage: Server error')).not.toBeNull();
+        expect(wrapper.getByText(`ErrorType: ${TyroErrorMessages[ErrorMessageType.SERVER_ERROR].type}`)).not.toBeNull();
+        expect(
+          wrapper.getByText(`ErrorMessage: ${TyroErrorMessages[ErrorMessageType.SERVER_ERROR].message}`)
+        ).not.toBeNull();
+        expect(wrapper.getByText(`ErrorCode: 503`)).not.toBeNull();
       });
     }, 15000);
 
-    test('sets tyroError to Timeout if after polling for result, its still processing', async () => {
+    test('sets tyroError to server error timeout if after polling for result, its still processing', async () => {
       (global.fetch as jest.Mock)
         .mockResolvedValueOnce(
-          mockFetch(200, { status: 'AWAITING_PAYMENT_INPUT', isLive: false } as ClientPayRequestResponse)
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
+            isLive: false,
+          } as ClientPayRequestResponse)
         ) // init and verify paySecret
         .mockResolvedValueOnce(
-          mockFetch(202, { status: 'AWAITING_PAYMENT_INPUT', isLive: false } as ClientPayRequestResponse)
+          mockFetch(HTTP_ACCEPTED, {
+            status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
+            isLive: false,
+          } as ClientPayRequestResponse)
         ) // submitPayRequest
         .mockResolvedValue(
-          mockFetch(200, {
+          mockFetch(HTTP_OK, {
             status: 'PROCESSING',
             isLive: false,
             origin: '',
@@ -426,7 +487,7 @@ describe('PaySheet', () => {
         ); // pollPayCompletion
       await act(async () => {
         await waitFor(async () => {
-          wrapper = await renderWithProvider(<InitTestComponent />, {
+          wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
             liveMode: false,
             styleProps: { showSupportedCards: false },
           });
@@ -435,21 +496,27 @@ describe('PaySheet', () => {
         checkForPaySheetRenders(wrapper);
         await fillOutForm(wrapper, '4111111111111111', 'test name', '01' + useYear, '123');
         await pressButton(wrapper, 'pay-button');
-        expect(wrapper.getByText('ErrorType: TIMEOUT')).not.toBeNull();
-        expect(wrapper.getByText('ErrorMessage: Timeout')).not.toBeNull();
+        expect(wrapper.getByText(`ErrorType: ${TyroErrorMessages.SERVER_ERROR.type}`)).not.toBeNull();
+        expect(wrapper.getByText(`ErrorCode: ${ErrorCodes.TIMEOUT}`)).not.toBeNull();
       });
     }, 1500000);
 
     test('sets tyroError to Unknown error if after polling for result, it has an unaccounted for status', async () => {
       (global.fetch as jest.Mock)
         .mockResolvedValueOnce(
-          mockFetch(200, { status: 'AWAITING_PAYMENT_INPUT', isLive: false } as ClientPayRequestResponse)
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
+            isLive: false,
+          } as ClientPayRequestResponse)
         ) // init and verify paySecret
         .mockResolvedValueOnce(
-          mockFetch(202, { status: 'AWAITING_PAYMENT_INPUT', isLive: false } as ClientPayRequestResponse)
+          mockFetch(HTTP_ACCEPTED, {
+            status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
+            isLive: false,
+          } as ClientPayRequestResponse)
         ) // submitPayRequest
         .mockResolvedValue(
-          mockFetch(200, {
+          mockFetch(HTTP_OK, {
             status: 'UNACCOUNTED FOR STATUS',
             isLive: false,
             origin: '',
@@ -459,7 +526,7 @@ describe('PaySheet', () => {
         ); // pollPayCompletion
       await act(async () => {
         await waitFor(async () => {
-          wrapper = await renderWithProvider(<InitTestComponent />, {
+          wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
             liveMode: false,
             styleProps: { showSupportedCards: false },
           });
@@ -468,49 +535,55 @@ describe('PaySheet', () => {
         checkForPaySheetRenders(wrapper);
         await fillOutForm(wrapper, '4111111111111111', 'test name', '01' + useYear, '123');
         await pressButton(wrapper, 'pay-button');
-        expect(wrapper.getByText('ErrorType: UNKNOWN_ERROR')).not.toBeNull();
-        expect(wrapper.getByText('ErrorMessage: Unknown error occurred')).not.toBeNull();
+        expect(wrapper.getByText(`ErrorType: ${TyroErrorMessages[ErrorMessageType.SERVER_ERROR].type}`)).not.toBeNull();
+        expect(wrapper.getByText(`ErrorCode: ${ErrorCodes.UNKNOWN_ERROR}`)).not.toBeNull();
       });
     }, 1500000);
 
     test('can submit payRequest, SUCCESS final status - 3DS Challenge', async () => {
       (global.fetch as jest.Mock)
         .mockResolvedValueOnce(
-          mockFetch(200, { status: 'AWAITING_PAYMENT_INPUT', isLive: false } as ClientPayRequestResponse)
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
+            isLive: false,
+          } as ClientPayRequestResponse)
         ) // init and verify paySecret
         .mockResolvedValueOnce(
-          mockFetch(202, { status: 'AWAITING_PAYMENT_INPUT', isLive: false } as ClientPayRequestResponse)
+          mockFetch(HTTP_ACCEPTED, {
+            status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
+            isLive: false,
+          } as ClientPayRequestResponse)
         ) // submitPayRequest
         .mockResolvedValueOnce(
-          mockFetch(200, {
-            status: 'AWAITING_AUTHENTICATION',
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.AWAITING_AUTHENTICATION,
             isLive: false,
           } as unknown as ClientPayRequestResponse)
         ) // pollPayCompletion
         .mockResolvedValueOnce(
-          mockFetch(200, {
-            status: 'AWAITING_AUTHENTICATION',
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.AWAITING_AUTHENTICATION,
             isLive: false,
             threeDSecure: {
-              status: 'AWAITING_AUTH',
+              status: ThreeDSecureStatus.AWAITING_AUTH,
               challengeURL: 'challenge-url',
             },
           } as unknown as ClientPayRequestResponse)
         ) // pollFor3DSecureMethodResult
-        .mockResolvedValueOnce(mockFetch(200, {} as unknown as ClientPayRequestResponse)) // invoke3DSecureAuth/send3DSecureAuthRequest
+        .mockResolvedValueOnce(mockFetch(HTTP_OK, {} as unknown as ClientPayRequestResponse)) // invoke3DSecureAuth/send3DSecureAuthRequest
         .mockResolvedValueOnce(
-          mockFetch(200, {
-            status: 'AWAITING_AUTHENTICATION',
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.AWAITING_AUTHENTICATION,
             isLive: false,
             threeDSecure: {
-              status: 'AWAITING_CHALLENGE',
+              status: ThreeDSecureStatus.AWAITING_CHALLENGE,
               challengeURL: 'challenge-url',
             },
           } as unknown as ClientPayRequestResponse)
         ) // pollFor3DSecureAuthResult
         .mockResolvedValueOnce(
-          mockFetch(200, {
-            status: 'SUCCESS',
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.SUCCESS,
             isLive: false,
             origin: '',
             total: {},
@@ -518,7 +591,7 @@ describe('PaySheet', () => {
         ); // pollFor3DSecureChallengeAndFinalResult
       await act(async () => {
         await waitFor(async () => {
-          wrapper = await renderWithProvider(<InitTestComponent />, {
+          wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
             liveMode: false,
             styleProps: { showSupportedCards: false },
           });
@@ -527,7 +600,7 @@ describe('PaySheet', () => {
         checkForPaySheetRenders(wrapper);
         await fillOutForm(wrapper, '4111111111111111', 'test name', '01' + useYear, '123');
         await pressButton(wrapper, 'pay-button');
-        expect(wrapper.getByText('Pay Request Status: SUCCESS')).not.toBeNull();
+        expect(wrapper.getByText(`Pay Request Status: ${PayRequestStatus.SUCCESS}`)).not.toBeNull();
         checkForPaySheetRenders(wrapper);
       });
     }, 15000);
@@ -535,53 +608,59 @@ describe('PaySheet', () => {
     test('can submit payRequest, FAILED final status - 3DS Challenge fails', async () => {
       (global.fetch as jest.Mock)
         .mockResolvedValueOnce(
-          mockFetch(200, { status: 'AWAITING_PAYMENT_INPUT', isLive: false } as ClientPayRequestResponse)
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
+            isLive: false,
+          } as ClientPayRequestResponse)
         ) // init and verify paySecret
         .mockResolvedValueOnce(
-          mockFetch(202, { status: 'AWAITING_PAYMENT_INPUT', isLive: false } as ClientPayRequestResponse)
+          mockFetch(HTTP_ACCEPTED, {
+            status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
+            isLive: false,
+          } as ClientPayRequestResponse)
         ) // submitPayRequest
         .mockResolvedValueOnce(
-          mockFetch(200, {
-            status: 'AWAITING_AUTHENTICATION',
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.AWAITING_AUTHENTICATION,
             isLive: false,
           } as unknown as ClientPayRequestResponse)
         ) // pollPayCompletion
         .mockResolvedValueOnce(
-          mockFetch(200, {
-            status: 'AWAITING_AUTHENTICATION',
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.AWAITING_AUTHENTICATION,
             isLive: false,
             threeDSecure: {
-              status: 'AWAITING_AUTH',
+              status: ThreeDSecureStatus.AWAITING_AUTH,
               challengeURL: 'challenge-url',
             },
           } as unknown as ClientPayRequestResponse)
         ) // pollFor3DSecureMethodResult
-        .mockResolvedValueOnce(mockFetch(200, {} as unknown as ClientPayRequestResponse)) // invoke3DSecureAuth/send3DSecureAuthRequest
+        .mockResolvedValueOnce(mockFetch(HTTP_OK, {} as unknown as ClientPayRequestResponse)) // invoke3DSecureAuth/send3DSecureAuthRequest
         .mockResolvedValueOnce(
-          mockFetch(200, {
-            status: 'AWAITING_AUTHENTICATION',
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.AWAITING_AUTHENTICATION,
             isLive: false,
             threeDSecure: {
-              status: 'AWAITING_CHALLENGE',
+              status: ThreeDSecureStatus.AWAITING_CHALLENGE,
               challengeURL: 'challenge-url',
             },
           } as unknown as ClientPayRequestResponse)
         ) // pollFor3DSecureAuthResult
         .mockResolvedValueOnce(
-          mockFetch(200, {
-            status: 'FAILED',
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.FAILED,
             isLive: false,
             origin: '',
             total: {},
-            errorCode: 'DECLINED',
+            errorCode: cardDeclined,
             threeDSecure: {
-              status: 'FAILED',
+              status: PayRequestStatus.FAILED,
             },
           } as unknown as ClientPayRequestResponse)
         ); // pollFor3DSecureChallengeAndFinalResult
       await act(async () => {
         await waitFor(async () => {
-          wrapper = await renderWithProvider(<InitTestComponent />, {
+          wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
             liveMode: false,
             styleProps: { showSupportedCards: false },
           });
@@ -590,43 +669,50 @@ describe('PaySheet', () => {
         checkForPaySheetRenders(wrapper);
         await fillOutForm(wrapper, '4111111111111111', 'test name', '01' + useYear, '123');
         await pressButton(wrapper, 'pay-button');
-        expect(wrapper.getByText('Pay Request Status: FAILED')).not.toBeNull();
-        // tyroError.errorCode gets set to PAYMENT_FAILED
-        expect(wrapper.getByText('ErrorType: PAYMENT_FAILED')).not.toBeNull();
-        expect(wrapper.getByText('ErrorCode: DECLINED')).not.toBeNull();
-        expect(wrapper.getByText('ErrorMessage: Payment failed')).not.toBeNull();
+        expect(wrapper.getByText(`Pay Request Status: ${PayRequestStatus.FAILED}`)).not.toBeNull();
+        // tyroError.errorCode gets set to errorcode on pay request
+        expect(
+          wrapper.getByText(`ErrorType: ${TyroErrorMessages[ErrorMessageType.PAY_REQUEST_ERROR].type}`)
+        ).not.toBeNull();
+        expect(wrapper.getByText(`ErrorCode: ${cardDeclined}`)).not.toBeNull();
       });
     }, 15000);
 
     test('Polling for 3d Secure Auth Result times out - tyroError set to TIMEOUT', async () => {
       (global.fetch as jest.Mock)
         .mockResolvedValueOnce(
-          mockFetch(200, { status: 'AWAITING_PAYMENT_INPUT', isLive: false } as ClientPayRequestResponse)
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
+            isLive: false,
+          } as ClientPayRequestResponse)
         ) // init and verify paySecret
         .mockResolvedValueOnce(
-          mockFetch(202, { status: 'AWAITING_PAYMENT_INPUT', isLive: false } as ClientPayRequestResponse)
+          mockFetch(HTTP_ACCEPTED, {
+            status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
+            isLive: false,
+          } as ClientPayRequestResponse)
         ) // submitPayRequest
         .mockResolvedValueOnce(
-          mockFetch(200, {
-            status: 'AWAITING_AUTHENTICATION',
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.AWAITING_AUTHENTICATION,
             isLive: false,
           } as unknown as ClientPayRequestResponse)
         ) // pollPayCompletion
         .mockResolvedValueOnce(
-          mockFetch(200, {
-            status: 'AWAITING_AUTHENTICATION',
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.AWAITING_AUTHENTICATION,
             isLive: false,
             threeDSecure: {
-              status: 'AWAITING_AUTH',
+              status: ThreeDSecureStatus.AWAITING_AUTH,
               challengeURL: 'challenge-url',
             },
           } as unknown as ClientPayRequestResponse)
         ) // pollFor3DSecureMethodResult
-        .mockResolvedValueOnce(mockFetch(200, {} as unknown as ClientPayRequestResponse)) // invoke3DSecureAuth/send3DSecureAuthRequest
+        .mockResolvedValueOnce(mockFetch(HTTP_OK, {} as unknown as ClientPayRequestResponse)) // invoke3DSecureAuth/send3DSecureAuthRequest
         .mockResolvedValueOnce(mockFetch(500, {} as unknown as ClientPayRequestResponse)); // pollFor3DSecureAuthResult
       await act(async () => {
         await waitFor(async () => {
-          wrapper = await renderWithProvider(<InitTestComponent />, {
+          wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
             liveMode: false,
             styleProps: { showSupportedCards: false },
           });
@@ -635,43 +721,49 @@ describe('PaySheet', () => {
         checkForPaySheetRenders(wrapper);
         await fillOutForm(wrapper, '4111111111111111', 'test name', '01' + useYear, '123');
         await pressButton(wrapper, 'pay-button');
-        // tyroError.errorCode gets set to PAYMENT_FAILED
-        expect(wrapper.getByText('ErrorType: TIMEOUT')).not.toBeNull();
-        expect(wrapper.getByText('ErrorMessage: Timeout')).not.toBeNull();
+        // tyroError.errorCode gets set to timeout
+        expect(wrapper.getByText(`ErrorType: ${TyroErrorMessages.SERVER_ERROR.type}`)).not.toBeNull();
+        expect(wrapper.getByText(`ErrorCode: ${ErrorCodes.TIMEOUT}`)).not.toBeNull();
       });
     }, 15000);
 
     test('can submit payRequest, polling for final result has an http error - 3DS Challenge unknown result', async () => {
       (global.fetch as jest.Mock)
         .mockResolvedValueOnce(
-          mockFetch(200, { status: 'AWAITING_PAYMENT_INPUT', isLive: false } as ClientPayRequestResponse)
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
+            isLive: false,
+          } as ClientPayRequestResponse)
         ) // init and verify paySecret
         .mockResolvedValueOnce(
-          mockFetch(202, { status: 'AWAITING_PAYMENT_INPUT', isLive: false } as ClientPayRequestResponse)
+          mockFetch(HTTP_ACCEPTED, {
+            status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
+            isLive: false,
+          } as ClientPayRequestResponse)
         ) // submitPayRequest
         .mockResolvedValueOnce(
-          mockFetch(200, {
-            status: 'AWAITING_AUTHENTICATION',
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.AWAITING_AUTHENTICATION,
             isLive: false,
           } as unknown as ClientPayRequestResponse)
         ) // pollPayCompletion
         .mockResolvedValueOnce(
-          mockFetch(200, {
-            status: 'AWAITING_AUTHENTICATION',
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.AWAITING_AUTHENTICATION,
             isLive: false,
             threeDSecure: {
-              status: 'AWAITING_AUTH',
+              status: ThreeDSecureStatus.AWAITING_AUTH,
               challengeURL: 'challenge-url',
             },
           } as unknown as ClientPayRequestResponse)
         ) // pollFor3DSecureMethodResult
-        .mockResolvedValueOnce(mockFetch(200, {} as unknown as ClientPayRequestResponse)) // invoke3DSecureAuth/send3DSecureAuthRequest
+        .mockResolvedValueOnce(mockFetch(HTTP_OK, {} as unknown as ClientPayRequestResponse)) // invoke3DSecureAuth/send3DSecureAuthRequest
         .mockResolvedValueOnce(
-          mockFetch(200, {
-            status: 'AWAITING_AUTHENTICATION',
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.AWAITING_AUTHENTICATION,
             isLive: false,
             threeDSecure: {
-              status: 'AWAITING_CHALLENGE',
+              status: ThreeDSecureStatus.AWAITING_CHALLENGE,
               challengeURL: 'challenge-url',
             },
           } as unknown as ClientPayRequestResponse)
@@ -679,7 +771,7 @@ describe('PaySheet', () => {
         .mockResolvedValueOnce(mockFetch(500, {} as unknown as ClientPayRequestResponse)); // pollFor3DSecureChallengeAndFinalResult
       await act(async () => {
         await waitFor(async () => {
-          wrapper = await renderWithProvider(<InitTestComponent />, {
+          wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
             liveMode: false,
             styleProps: { showSupportedCards: false },
           });
@@ -688,45 +780,51 @@ describe('PaySheet', () => {
         checkForPaySheetRenders(wrapper);
         await fillOutForm(wrapper, '4111111111111111', 'test name', '01' + useYear, '123');
         await pressButton(wrapper, 'pay-button');
-        expect(wrapper.getByText('ErrorType: TIMEOUT')).not.toBeNull();
-        expect(wrapper.getByText('ErrorMessage: Timeout')).not.toBeNull();
+        expect(wrapper.getByText(`ErrorType: ${TyroErrorMessages.SERVER_ERROR.type}`)).not.toBeNull();
+        expect(wrapper.getByText(`ErrorCode: ${ErrorCodes.TIMEOUT}`)).not.toBeNull();
       });
     }, 15000);
 
     test('can submit payRequest - Frictionless 3DS SUCCESS', async () => {
       (global.fetch as jest.Mock)
         .mockResolvedValueOnce(
-          mockFetch(200, { status: 'AWAITING_PAYMENT_INPUT', isLive: false } as ClientPayRequestResponse)
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
+            isLive: false,
+          } as ClientPayRequestResponse)
         ) // init and verify paySecret
         .mockResolvedValueOnce(
-          mockFetch(202, { status: 'AWAITING_PAYMENT_INPUT', isLive: false } as ClientPayRequestResponse)
+          mockFetch(HTTP_ACCEPTED, {
+            status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
+            isLive: false,
+          } as ClientPayRequestResponse)
         ) // submitPayRequest
         .mockResolvedValueOnce(
-          mockFetch(200, {
-            status: 'AWAITING_AUTHENTICATION',
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.AWAITING_AUTHENTICATION,
             isLive: false,
           } as unknown as ClientPayRequestResponse)
         ) // pollPayCompletion
         .mockResolvedValueOnce(
-          mockFetch(200, {
-            status: 'AWAITING_AUTHENTICATION',
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.AWAITING_AUTHENTICATION,
             isLive: false,
             threeDSecure: {
-              status: 'AWAITING_AUTH',
+              status: ThreeDSecureStatus.AWAITING_AUTH,
               challengeURL: 'challenge-url',
             },
           } as unknown as ClientPayRequestResponse)
         ) // pollFor3DSecureMethodResult
-        .mockResolvedValueOnce(mockFetch(200, {} as unknown as ClientPayRequestResponse)) // invoke3DSecureAuth/send3DSecureAuthRequest
+        .mockResolvedValueOnce(mockFetch(HTTP_OK, {} as unknown as ClientPayRequestResponse)) // invoke3DSecureAuth/send3DSecureAuthRequest
         .mockResolvedValueOnce(
-          mockFetch(200, {
-            status: 'SUCCESS',
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.SUCCESS,
             isLive: false,
           } as unknown as ClientPayRequestResponse)
         );
       await act(async () => {
         await waitFor(async () => {
-          wrapper = await renderWithProvider(<InitTestComponent />, {
+          wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
             liveMode: false,
             styleProps: { showSupportedCards: false },
           });
@@ -735,45 +833,51 @@ describe('PaySheet', () => {
         checkForPaySheetRenders(wrapper);
         await fillOutForm(wrapper, '4111111111111111', 'test name', '01' + useYear, '123');
         await pressButton(wrapper, 'pay-button');
-        expect(wrapper.getByText('Pay Request Status: SUCCESS')).not.toBeNull();
+        expect(wrapper.getByText(`Pay Request Status: ${PayRequestStatus.SUCCESS}`)).not.toBeNull();
       });
     }, 15000);
 
     test('can submit payRequest - Frictionless 3DS FAILED', async () => {
       (global.fetch as jest.Mock)
         .mockResolvedValueOnce(
-          mockFetch(200, { status: 'AWAITING_PAYMENT_INPUT', isLive: false } as ClientPayRequestResponse)
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
+            isLive: false,
+          } as ClientPayRequestResponse)
         ) // init and verify paySecret
         .mockResolvedValueOnce(
-          mockFetch(202, { status: 'AWAITING_PAYMENT_INPUT', isLive: false } as ClientPayRequestResponse)
+          mockFetch(HTTP_ACCEPTED, {
+            status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
+            isLive: false,
+          } as ClientPayRequestResponse)
         ) // submitPayRequest
         .mockResolvedValueOnce(
-          mockFetch(200, {
-            status: 'AWAITING_AUTHENTICATION',
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.AWAITING_AUTHENTICATION,
             isLive: false,
           } as unknown as ClientPayRequestResponse)
         ) // pollPayCompletion
         .mockResolvedValueOnce(
-          mockFetch(200, {
-            status: 'AWAITING_AUTHENTICATION',
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.AWAITING_AUTHENTICATION,
             isLive: false,
             threeDSecure: {
-              status: 'AWAITING_AUTH',
+              status: ThreeDSecureStatus.AWAITING_AUTH,
               challengeURL: 'challenge-url',
             },
           } as unknown as ClientPayRequestResponse)
         ) // pollFor3DSecureMethodResult
-        .mockResolvedValueOnce(mockFetch(200, {} as unknown as ClientPayRequestResponse)) // invoke3DSecureAuth/send3DSecureAuthRequest
+        .mockResolvedValueOnce(mockFetch(HTTP_OK, {} as unknown as ClientPayRequestResponse)) // invoke3DSecureAuth/send3DSecureAuthRequest
         .mockResolvedValueOnce(
-          mockFetch(200, {
-            status: 'FAILED',
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.FAILED,
             isLive: false,
-            errorCode: 'DECLINED',
+            errorCode: cardDeclined,
           } as unknown as ClientPayRequestResponse)
         );
       await act(async () => {
         await waitFor(async () => {
-          wrapper = await renderWithProvider(<InitTestComponent />, {
+          wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
             liveMode: false,
             styleProps: { showSupportedCards: false },
           });
@@ -782,33 +886,34 @@ describe('PaySheet', () => {
         checkForPaySheetRenders(wrapper);
         await fillOutForm(wrapper, '4111111111111111', 'test name', '01' + useYear, '123');
         await pressButton(wrapper, 'pay-button');
-        expect(wrapper.getByText('Pay Request Status: FAILED')).not.toBeNull();
+        expect(wrapper.getByText(`Pay Request Status: ${PayRequestStatus.FAILED}`)).not.toBeNull();
         // tyroError.errorCode gets set to PAYMENT_FAILED
-        expect(wrapper.getByText('ErrorType: PAYMENT_FAILED')).not.toBeNull();
-        expect(wrapper.getByText('ErrorCode: DECLINED')).not.toBeNull();
-        expect(wrapper.getByText('ErrorMessage: Payment failed')).not.toBeNull();
+        expect(
+          wrapper.getByText(`ErrorType: ${TyroErrorMessages[ErrorMessageType.PAY_REQUEST_ERROR].type}`)
+        ).not.toBeNull();
+        expect(wrapper.getByText(`ErrorCode: ${cardDeclined}`)).not.toBeNull();
       });
     }, 15000);
 
     test('pollFor3DSecureMethodResult returns an http error, sets tyroError to SERVER_ERROR', async () => {
       (global.fetch as jest.Mock)
         .mockResolvedValueOnce(
-          mockFetch(200, {
-            status: 'AWAITING_PAYMENT_INPUT',
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
             isLive: false,
             origin: 'nope',
           } as unknown as ClientPayRequestResponse)
         ) // init and verify paySecret
         .mockResolvedValueOnce(
-          mockFetch(202, {
-            status: 'AWAITING_PAYMENT_INPUT',
+          mockFetch(HTTP_ACCEPTED, {
+            status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
             isLive: false,
             origin: 'nope',
           } as unknown as ClientPayRequestResponse)
         ) // submitPayRequest
         .mockResolvedValueOnce(
-          mockFetch(200, {
-            status: 'AWAITING_AUTHENTICATION',
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.AWAITING_AUTHENTICATION,
             isLive: false,
             origin: 'nope',
           } as unknown as ClientPayRequestResponse)
@@ -816,7 +921,7 @@ describe('PaySheet', () => {
         .mockResolvedValueOnce(mockFetch(400, { want: 'this' } as unknown as ClientPayRequestResponse)); // pollFor3DSecureMethodResult
       await act(async () => {
         await waitFor(async () => {
-          wrapper = await renderWithProvider(<InitTestComponent />, {
+          wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
             liveMode: false,
             styleProps: { showSupportedCards: false },
           });
@@ -826,8 +931,10 @@ describe('PaySheet', () => {
         await fillOutForm(wrapper, '4111111111111111', 'test name', '01' + useYear, '123');
         await pressButton(wrapper, 'pay-button');
         // tyroError.errorCode gets set to PAYMENT_FAILED
-        expect(wrapper.getByText('ErrorType: SERVER_ERROR')).not.toBeNull();
-        expect(wrapper.getByText('ErrorMessage: Server error')).not.toBeNull();
+        expect(wrapper.getByText(`ErrorType: ${TyroErrorMessages[ErrorMessageType.SERVER_ERROR].type}`)).not.toBeNull();
+        expect(
+          wrapper.getByText(`ErrorMessage: ${TyroErrorMessages[ErrorMessageType.SERVER_ERROR].message}`)
+        ).not.toBeNull();
       });
     }, 15000);
   });
@@ -835,11 +942,14 @@ describe('PaySheet', () => {
   describe('On submit form validation', () => {
     test('Cannot submit paysheet when all inputs not present', async () => {
       (global.fetch as jest.Mock).mockResolvedValueOnce(
-        mockFetch(200, { status: 'AWAITING_PAYMENT_INPUT', isLive: false } as ClientPayRequestResponse)
+        mockFetch(HTTP_OK, {
+          status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
+          isLive: false,
+        } as ClientPayRequestResponse)
       ); // init and verify paySecret
       await act(async () => {
         await waitFor(async () => {
-          wrapper = await renderWithProvider(<InitTestComponent />, {
+          wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
             liveMode: false,
             styleProps: { showSupportedCards: false },
           });
@@ -853,17 +963,20 @@ describe('PaySheet', () => {
         expect(wrapper.queryByText('Please enter a card expiry')).not.toBeNull();
         expect(wrapper.queryByText('Please enter a security code')).not.toBeNull();
         // no failed status for pay request i.e. nothing was submitted
-        expect(wrapper.queryByText('Pay Request Status: FAILED')).toBeNull();
+        expect(wrapper.queryByText(`Pay Request Status: ${PayRequestStatus.FAILED}`)).toBeNull();
       });
     }, 15000);
 
     test('Errors are presented by blurring the fields', async () => {
       (global.fetch as jest.Mock).mockResolvedValueOnce(
-        mockFetch(200, { status: 'AWAITING_PAYMENT_INPUT', isLive: false } as ClientPayRequestResponse)
+        mockFetch(HTTP_OK, {
+          status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
+          isLive: false,
+        } as ClientPayRequestResponse)
       ); // init and verify paySecret
       await act(async () => {
         await waitFor(async () => {
-          wrapper = await renderWithProvider(<InitTestComponent />, {
+          wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
             liveMode: false,
             styleProps: { showSupportedCards: false },
           });
@@ -888,17 +1001,20 @@ describe('PaySheet', () => {
         expect(wrapper.queryByText('Please enter a card expiry')).not.toBeNull();
         expect(wrapper.queryByText('Please enter a security code')).not.toBeNull();
         // no failed status for pay request i.e. nothing was submitted
-        expect(wrapper.queryByText('Pay Request Status: FAILED')).toBeNull();
+        expect(wrapper.queryByText(`Pay Request Status: ${PayRequestStatus.FAILED}`)).toBeNull();
       });
     }, 15000);
 
     test('Cannot submit paySheet when just the card number has been given', async () => {
       (global.fetch as jest.Mock).mockResolvedValueOnce(
-        mockFetch(200, { status: 'AWAITING_PAYMENT_INPUT', isLive: false } as ClientPayRequestResponse)
+        mockFetch(HTTP_OK, {
+          status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
+          isLive: false,
+        } as ClientPayRequestResponse)
       ); // init and verify paySecret
       await act(async () => {
         await waitFor(async () => {
-          wrapper = await renderWithProvider(<InitTestComponent />, {
+          wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
             liveMode: false,
             styleProps: { showSupportedCards: false },
           });
@@ -914,17 +1030,20 @@ describe('PaySheet', () => {
         expect(wrapper.queryByText('Please enter a card expiry')).not.toBeNull();
         expect(wrapper.queryByText('Please enter a security code')).not.toBeNull();
         // no failed status for pay request i.e. nothing was submitted
-        expect(wrapper.queryByText('Pay Request Status: FAILED')).toBeNull();
+        expect(wrapper.queryByText(`Pay Request Status: ${PayRequestStatus.FAILED}`)).toBeNull();
       });
     }, 15000);
 
     test('Cannot submit paySheet when just the name on card has been given', async () => {
       (global.fetch as jest.Mock).mockResolvedValueOnce(
-        mockFetch(200, { status: 'AWAITING_PAYMENT_INPUT', isLive: false } as ClientPayRequestResponse)
+        mockFetch(HTTP_OK, {
+          status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
+          isLive: false,
+        } as ClientPayRequestResponse)
       ); // init and verify paySecret
       await act(async () => {
         await waitFor(async () => {
-          wrapper = await renderWithProvider(<InitTestComponent />, {
+          wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
             liveMode: false,
             styleProps: { showSupportedCards: false },
           });
@@ -940,17 +1059,20 @@ describe('PaySheet', () => {
         expect(wrapper.queryByText('Please enter a card expiry')).not.toBeNull();
         expect(wrapper.queryByText('Please enter a security code')).not.toBeNull();
         // no failed status for pay request i.e. nothing was submitted
-        expect(wrapper.queryByText('Pay Request Status: FAILED')).toBeNull();
+        expect(wrapper.queryByText(`Pay Request Status: ${PayRequestStatus.FAILED}`)).toBeNull();
       });
     }, 15000);
 
     test('Cannot submit paySheet when just the card expiry has been given', async () => {
       (global.fetch as jest.Mock).mockResolvedValueOnce(
-        mockFetch(200, { status: 'AWAITING_PAYMENT_INPUT', isLive: false } as ClientPayRequestResponse)
+        mockFetch(HTTP_OK, {
+          status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
+          isLive: false,
+        } as ClientPayRequestResponse)
       ); // init and verify paySecret
       await act(async () => {
         await waitFor(async () => {
-          wrapper = await renderWithProvider(<InitTestComponent />, {
+          wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
             liveMode: false,
             styleProps: { showSupportedCards: false },
           });
@@ -966,17 +1088,20 @@ describe('PaySheet', () => {
         expect(wrapper.queryByText('Please enter a card expiry')).toBeNull();
         expect(wrapper.queryByText('Please enter a security code')).not.toBeNull();
         // no failed status for pay request i.e. nothing was submitted
-        expect(wrapper.queryByText('Pay Request Status: FAILED')).toBeNull();
+        expect(wrapper.queryByText(`Pay Request Status: ${PayRequestStatus.FAILED}`)).toBeNull();
       });
     }, 15000);
 
     test('Cannot submit paySheet when just the card cvv has been given', async () => {
       (global.fetch as jest.Mock).mockResolvedValueOnce(
-        mockFetch(200, { status: 'AWAITING_PAYMENT_INPUT', isLive: false } as ClientPayRequestResponse)
+        mockFetch(HTTP_OK, {
+          status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
+          isLive: false,
+        } as ClientPayRequestResponse)
       ); // init and verify paySecret
       await act(async () => {
         await waitFor(async () => {
-          wrapper = await renderWithProvider(<InitTestComponent />, {
+          wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
             liveMode: false,
             styleProps: { showSupportedCards: false },
           });
@@ -992,17 +1117,20 @@ describe('PaySheet', () => {
         expect(wrapper.queryByText('Please enter a card expiry')).not.toBeNull();
         expect(wrapper.queryByText('Please enter a security code')).toBeNull();
         // no failed status for pay request i.e. nothing was submitted
-        expect(wrapper.queryByText('Pay Request Status: FAILED')).toBeNull();
+        expect(wrapper.queryByText(`Pay Request Status: ${PayRequestStatus.FAILED}`)).toBeNull();
       });
     }, 15000);
 
     test('Expects that the amex CVV must be 4 digits', async () => {
       (global.fetch as jest.Mock).mockResolvedValueOnce(
-        mockFetch(200, { status: 'AWAITING_PAYMENT_INPUT', isLive: false } as ClientPayRequestResponse)
+        mockFetch(HTTP_OK, {
+          status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
+          isLive: false,
+        } as ClientPayRequestResponse)
       ); // init and verify paySecret
       await act(async () => {
         await waitFor(async () => {
-          wrapper = await renderWithProvider(<InitTestComponent />, {
+          wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
             liveMode: false,
             styleProps: { showSupportedCards: false },
           });
@@ -1018,21 +1146,21 @@ describe('PaySheet', () => {
         expect(wrapper.queryByText('Please enter a card expiry')).toBeNull();
         expect(wrapper.queryByText('Invalid security code')).not.toBeNull();
         // no failed status for pay request i.e. nothing was submitted
-        expect(wrapper.queryByText('Pay Request Status: FAILED')).toBeNull();
+        expect(wrapper.queryByText(`Pay Request Status: ${PayRequestStatus.FAILED}`)).toBeNull();
       });
     }, 15000);
 
     test('Cannot submit paySheet when supportedNetworks is visa, but mastercard is supplied', async () => {
       (global.fetch as jest.Mock).mockResolvedValueOnce(
-        mockFetch(200, {
-          status: 'AWAITING_PAYMENT_INPUT',
+        mockFetch(HTTP_OK, {
+          status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
           supportedNetworks: [CardTypeNames.VISA],
           isLive: false,
         } as ClientPayRequestResponse)
       );
       await act(async () => {
         await waitFor(async () => {
-          wrapper = await renderWithProvider(<InitTestComponent />, {
+          wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
             liveMode: false,
             options: { creditCardForm: { supportedNetworks: [CardTypeNames.VISA] } },
           });
@@ -1043,25 +1171,38 @@ describe('PaySheet', () => {
         // try submitting the empty form
         await pressButton(wrapper, 'pay-button');
         // error messages appear/don't appear
-        expect(wrapper.getByText('ErrorType: INVALID_CARD_TYPE')).not.toBeNull();
-        expect(wrapper.getByText('ErrorMessage: Card type not supported.')).not.toBeNull();
+        expect(wrapper.getByText(`ErrorType: ${TyroErrorMessages[ErrorMessageType.CARD_ERROR].type}`)).not.toBeNull();
+        expect(wrapper.getByText(`ErrorCode: ${ErrorCodes.INVALID_CARD_TYPE}`)).not.toBeNull();
       });
     }, 15000);
   });
 
   describe('Getting new paysecret', () => {
-    test('if submitting the pay request fails, tyroError is set with payment failed', async () => {
+    test('if submitting the pay request fails, tyroError is set with server error and failed to submit error code', async () => {
       (global.fetch as jest.Mock)
         .mockResolvedValueOnce(
-          mockFetch(200, { status: 'AWAITING_PAYMENT_INPUT', isLive: false } as ClientPayRequestResponse)
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
+            isLive: false,
+          } as ClientPayRequestResponse)
         ) // init and verify paySecret
-        .mockResolvedValueOnce(mockFetch(500, {} as ClientPayRequestResponse))
+        .mockResolvedValueOnce(mockFetch(500, {} as ClientPayRequestResponse)) // submit pay request
         .mockResolvedValueOnce(
-          mockFetch(200, { status: 'AWAITING_PAYMENT_INPUT', isLive: false } as ClientPayRequestResponse)
-        ); // init and verify paySecret again // submitPayRequest
+          // poll for pay request
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
+            isLive: false,
+          } as ClientPayRequestResponse)
+        )
+        .mockResolvedValueOnce(
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
+            isLive: false,
+          } as ClientPayRequestResponse)
+        ); // init and verify paySecret
       await act(async () => {
         await waitFor(async () => {
-          wrapper = await renderWithProvider(<InitTestComponent />, {
+          wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
             liveMode: false,
             styleProps: { showSupportedCards: false },
           });
@@ -1071,26 +1212,44 @@ describe('PaySheet', () => {
         await fillOutForm(wrapper, '4111111111111111', 'test name', '01' + useYear, '123');
         // tyroError is set with a Payment failed error
         await pressButton(wrapper, 'pay-button');
-        expect(wrapper.getByText('ErrorMessage: Payment failed')).not.toBeNull();
+        expect(wrapper.getByText(`ErrorType: ${TyroErrorMessages[ErrorMessageType.SERVER_ERROR].type}`)).not.toBeNull();
+        expect(wrapper.getByText(`ErrorCode: ${ErrorCodes.FAILED_TO_SUBMIT}`)).not.toBeNull();
         // get a new pay secret
         await pressButton(wrapper, 'test-button');
         // tyroError is reset
-        expect(wrapper.queryByText('ErrorMessage: Payment failed')).toBeNull();
+        expect(
+          wrapper.queryByText(`ErrorMessage: ${TyroErrorMessages[ErrorMessageType.SERVER_ERROR].message}`)
+        ).toBeNull();
       });
     }, 15000);
 
     test('when setting a new pay secret, an error occurs e.g. 403 - tyroError will say PaySheet failed to initialise', async () => {
       (global.fetch as jest.Mock)
         .mockResolvedValueOnce(
-          mockFetch(200, { status: 'AWAITING_PAYMENT_INPUT', isLive: false } as ClientPayRequestResponse)
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
+            isLive: false,
+          } as ClientPayRequestResponse)
         ) // init and verify paySecret
-        .mockResolvedValueOnce(mockFetch(500, {} as ClientPayRequestResponse))
         .mockResolvedValueOnce(
-          mockFetch(403, { status: 'AWAITING_PAYMENT_INPUT', isLive: false } as ClientPayRequestResponse)
+          mockFetch(HTTP_ACCEPTED, { status: PayRequestStatus.FAILED, isLive: false } as ClientPayRequestResponse)
+        ) // submitPayRequest
+        .mockResolvedValueOnce(
+          mockFetch(HTTP_OK, {
+            status: PayRequestStatus.FAILED,
+            isLive: false,
+            errorCode: cardDeclined,
+          } as unknown as ClientPayRequestResponse)
+        ) // pollPayCompletion
+        .mockResolvedValueOnce(
+          mockFetch(HTTP_FORBIDDEN, {
+            status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
+            isLive: false,
+          } as ClientPayRequestResponse)
         ); // init and verify paySecret again // submitPayRequest
       await act(async () => {
         await waitFor(async () => {
-          wrapper = await renderWithProvider(<InitTestComponent />, {
+          wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
             liveMode: false,
             styleProps: { showSupportedCards: false },
           });
@@ -1100,11 +1259,17 @@ describe('PaySheet', () => {
         await fillOutForm(wrapper, '4111111111111111', 'test name', '01' + useYear, '123');
         // tyroError is set with a Payment failed error
         await pressButton(wrapper, 'pay-button');
-        expect(wrapper.getByText('ErrorMessage: Payment failed')).not.toBeNull();
+        expect(
+          wrapper.getByText(`ErrorMessage: ${TyroErrorMessages[ErrorMessageType.PAY_REQUEST_ERROR].message}`)
+        ).not.toBeNull();
+        expect(wrapper.getByText(`ErrorCode: ${cardDeclined}`)).not.toBeNull();
         // get a new pay secret`
         await pressButton(wrapper, 'test-button');
         // tyroError is reset
-        expect(wrapper.getByText('ErrorMessage: PaySheet failed to initialise')).not.toBeNull();
+        expect(
+          wrapper.getByText(`ErrorMessage: ${TyroErrorMessages[ErrorMessageType.SERVER_ERROR].message}`)
+        ).not.toBeNull();
+        expect(wrapper.getByText(`ErrorCode: ${HTTP_FORBIDDEN}`)).not.toBeNull();
       });
     }, 15000);
   });
@@ -1112,8 +1277,8 @@ describe('PaySheet', () => {
   describe('styleProps handling', () => {
     beforeEach(() => {
       (global.fetch as jest.Mock).mockResolvedValueOnce(
-        mockFetch(200, {
-          status: 'AWAITING_PAYMENT_INPUT',
+        mockFetch(HTTP_OK, {
+          status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
           isLive: false,
           supportedNetworks: null,
         } as ClientPayRequestResponse)
@@ -1124,15 +1289,16 @@ describe('PaySheet', () => {
       it('defaults walletPaymentsDividerText', async () => {
         await act(async () => {
           await waitFor(async () => {
-            wrapper = await renderWithProvider(<InitTestComponent />, {
+            wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
               liveMode: false,
               options: {
                 googlePay: {
                   enabled: false,
+                  merchantName,
                 },
                 applePay: {
                   enabled: true,
-                  merchantIdentifier: 'merchantIdentifier',
+                  merchantIdentifier,
                   supportedNetworks: ['visa'],
                 },
               },
@@ -1147,14 +1313,16 @@ describe('PaySheet', () => {
       it('handles walletPaymentsDividerText', async () => {
         await act(async () => {
           await waitFor(async () => {
-            wrapper = await renderWithProvider(<InitTestComponent />, {
+            wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
               liveMode: false,
               options: {
                 googlePay: {
                   enabled: true,
+                  merchantName,
                 },
                 applePay: {
                   enabled: true,
+                  merchantIdentifier,
                 },
               },
               styleProps: { walletPaymentsDividerText: 'My Custom Divider Text', showSupportedCards: false },
@@ -1168,14 +1336,16 @@ describe('PaySheet', () => {
       it('can disable walletPaymentsDividerEnabled', async () => {
         await act(async () => {
           await waitFor(async () => {
-            wrapper = await renderWithProvider(<InitTestComponent />, {
+            wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
               liveMode: false,
               options: {
                 googlePay: {
                   enabled: true,
+                  merchantName,
                 },
                 applePay: {
                   enabled: true,
+                  merchantIdentifier,
                 },
               },
               styleProps: { walletPaymentsDividerEnabled: false, showSupportedCards: false },
@@ -1191,7 +1361,7 @@ describe('PaySheet', () => {
       it('defaults to showing blank card icon', async () => {
         await act(async () => {
           await waitFor(async () => {
-            wrapper = await renderWithProvider(<InitTestComponent />, {
+            wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
               liveMode: false,
               styleProps: { showSupportedCards: false },
             });
@@ -1207,7 +1377,7 @@ describe('PaySheet', () => {
       it('it shows visa card when a visa is entered', async () => {
         await act(async () => {
           await waitFor(async () => {
-            wrapper = await renderWithProvider(<InitTestComponent />, {
+            wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
               liveMode: false,
               styleProps: { showSupportedCards: false },
             });
@@ -1223,7 +1393,7 @@ describe('PaySheet', () => {
       it('it shows mastercard card when a mastercard is entered', async () => {
         await act(async () => {
           await waitFor(async () => {
-            wrapper = await renderWithProvider(<InitTestComponent />, {
+            wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
               liveMode: false,
               styleProps: { showSupportedCards: false },
             });
@@ -1240,7 +1410,7 @@ describe('PaySheet', () => {
       it('it shows error when credit card invalid', async () => {
         await act(async () => {
           await waitFor(async () => {
-            wrapper = await renderWithProvider(<InitTestComponent />, {
+            wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
               liveMode: false,
               styleProps: { showSupportedCards: false },
             });
@@ -1256,7 +1426,7 @@ describe('PaySheet', () => {
       it('it shows error when cvc invalid', async () => {
         await act(async () => {
           await waitFor(async () => {
-            wrapper = await renderWithProvider(<InitTestComponent />, {
+            wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
               liveMode: false,
               styleProps: { showSupportedCards: false },
             });
@@ -1272,7 +1442,7 @@ describe('PaySheet', () => {
       it('it shows nothing when disabled and nothing entered', async () => {
         await act(async () => {
           await waitFor(async () => {
-            wrapper = await renderWithProvider(<InitTestComponent />, {
+            wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
               liveMode: false,
               styleProps: { showCardIcon: false },
             });
@@ -1287,7 +1457,7 @@ describe('PaySheet', () => {
       it('it shows nothing when disabled and something entered', async () => {
         await act(async () => {
           await waitFor(async () => {
-            wrapper = await renderWithProvider(<InitTestComponent />, {
+            wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
               liveMode: false,
               styleProps: { showCardIcon: false },
             });
@@ -1315,7 +1485,7 @@ describe('PaySheet', () => {
       it('it shows card preview', async () => {
         await act(async () => {
           await waitFor(async () => {
-            wrapper = await renderWithProvider(<InitTestComponent />, {
+            wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
               liveMode: false,
             });
           });
@@ -1335,7 +1505,7 @@ describe('PaySheet', () => {
       it('it shows card preview when showCardIcon is false', async () => {
         await act(async () => {
           await waitFor(async () => {
-            wrapper = await renderWithProvider(<InitTestComponent />, {
+            wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
               liveMode: false,
               styleProps: { showCardIcon: false },
             });
@@ -1350,7 +1520,7 @@ describe('PaySheet', () => {
       it('it shows relative card icon when start entering card number', async () => {
         await act(async () => {
           await waitFor(async () => {
-            wrapper = await renderWithProvider(<InitTestComponent />, {
+            wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
               liveMode: false,
             });
           });
@@ -1370,7 +1540,7 @@ describe('PaySheet', () => {
       it('it shows error when credit card invalid', async () => {
         await act(async () => {
           await waitFor(async () => {
-            wrapper = await renderWithProvider(<InitTestComponent />, {
+            wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
               liveMode: false,
             });
           });
@@ -1387,7 +1557,7 @@ describe('PaySheet', () => {
       it('defaults to enable error spacing on all input fields', async () => {
         await act(async () => {
           await waitFor(async () => {
-            wrapper = await renderWithProvider(<InitTestComponent />, {
+            wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
               liveMode: false,
               styleProps: { showSupportedCards: false },
             });
@@ -1400,7 +1570,7 @@ describe('PaySheet', () => {
       it('setting true enables error spacing', async () => {
         await act(async () => {
           await waitFor(async () => {
-            wrapper = await renderWithProvider(<InitTestComponent />, {
+            wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
               liveMode: false,
               styleProps: { showErrorSpacing: true, showSupportedCards: false },
             });
@@ -1413,7 +1583,7 @@ describe('PaySheet', () => {
       it('can disable error spacing', async () => {
         await act(async () => {
           await waitFor(async () => {
-            wrapper = await renderWithProvider(<InitTestComponent />, {
+            wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
               liveMode: false,
               styleProps: { showErrorSpacing: false, showSupportedCards: false },
             });
@@ -1428,7 +1598,7 @@ describe('PaySheet', () => {
       it('defaults to use placeholder text with labelPosition=floating', async () => {
         await act(async () => {
           await waitFor(async () => {
-            wrapper = await renderWithProvider(<InitTestComponent />, {
+            wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
               liveMode: false,
               styleProps: { showSupportedCards: false },
             });
@@ -1447,7 +1617,7 @@ describe('PaySheet', () => {
       it('supports label text with labelPosition=block', async () => {
         await act(async () => {
           await waitFor(async () => {
-            wrapper = await renderWithProvider(<InitTestComponent />, {
+            wrapper = await renderWithProvider(<InitTestComponent passPaySecret={true} />, {
               liveMode: false,
               styleProps: { labelPosition: TyroPayStyleLabelPositions.BLOCK, showSupportedCards: false },
             });
@@ -1468,7 +1638,10 @@ describe('PaySheet', () => {
   describe('basic UI/UX responses', () => {
     it('should focus and blur components on press', async () => {
       (global.fetch as jest.Mock).mockResolvedValueOnce(
-        mockFetch(200, { status: 'AWAITING_PAYMENT_INPUT', isLive: false } as ClientPayRequestResponse)
+        mockFetch(HTTP_OK, {
+          status: PayRequestStatus.AWAITING_PAYMENT_INPUT,
+          isLive: false,
+        } as ClientPayRequestResponse)
       ); // init and verify paySecret
       await act(async () => {
         await waitFor(async () => {

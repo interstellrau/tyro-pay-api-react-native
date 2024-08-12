@@ -1,6 +1,6 @@
 import { ClientPayRequestResponse } from '../@types/pay-request-types';
 import { CardDetails } from '../@types/card-types';
-import { HTTP_ACCEPTED, HTTP_FORBIDDEN, HTTP_OK } from '../@types/http-status-codes';
+import { HTTP_ACCEPTED, HTTP_OK } from '../@types/http-status-codes';
 import { PaymentType } from '../@types/payment-types';
 import {
   INITIAL_UPDATED_STATUSES,
@@ -8,9 +8,16 @@ import {
   POLL_INTERVAL_MS,
 } from './config/pay-request-client-config';
 import { LIVE_INBOUND_BASE_URL, SANDBOX_INBOUND_BASE_URL, TYRO_BASE_URL } from './constants';
+import { HttpStatusError } from '../@types/http-error-types';
 
 const setHeader = (paySecret: string): RequestInit => {
   return { headers: { 'Pay-Secret': paySecret } };
+};
+
+const httpStatusError = (data: Response): HttpStatusError => {
+  const error = new Error('Http Status Error') as HttpStatusError;
+  error.status = String(data.status);
+  return error;
 };
 
 export const getPayRequest = async (paySecret: string): Promise<ClientPayRequestResponse> => {
@@ -18,10 +25,7 @@ export const getPayRequest = async (paySecret: string): Promise<ClientPayRequest
   if (data.status === HTTP_OK) {
     return data.json();
   }
-  if (data.status === HTTP_FORBIDDEN) {
-    throw new Error('Invalid Pay Secret.');
-  }
-  throw new Error('Something went wrong.');
+  throw httpStatusError(data);
 };
 
 export const submitPayRequest = async (
@@ -36,7 +40,7 @@ export const submitPayRequest = async (
     body: JSON.stringify({ cardDetails, paymentType: PaymentType.CARD }),
   });
   if (response.status !== HTTP_ACCEPTED) {
-    throw new Error('Payment failed to submit');
+    throw httpStatusError(response);
   }
 };
 

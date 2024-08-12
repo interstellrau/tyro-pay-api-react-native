@@ -1,8 +1,9 @@
 appId: ${APP_ID}
 ---
 - launchApp
-- assertVisible: "Demo Checkout"
-- tapOn: "CHECKOUT"
+- assertVisible: "Tyro Pay Demo"
+- tapOn: "+"
+- tapOn: "checkout"
 - extendedWaitUntil:
     visible: "Or pay with card"
     timeout: 150000
@@ -13,6 +14,6 @@ appId: ${APP_ID}
     timeout: 150000
 - tapOn: "close"
 - assertNotVisible: "ErrorCode: THREED_SECURE_FAILED"
-- assertNotVisible: "ErrorMessage: Payment failed"
+- assertNotVisible: "ErrorMessage: There was an error with the pay request, either validation error or payment failed."
 - assertVisible:
     id: "apple-pay-button"

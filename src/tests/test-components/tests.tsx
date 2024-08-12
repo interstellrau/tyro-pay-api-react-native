@@ -22,13 +22,20 @@ export const ProviderTestComponent = (): JSX.Element => {
   );
 };
 
-export const InitTestComponent = (): JSX.Element => {
+type InitTestComponentProps = {
+  passPaySecret: boolean;
+};
+
+export const InitTestComponent = ({ passPaySecret }: InitTestComponentProps): JSX.Element => {
   const [loadPaySheet, setLoadPaySheet] = useState(false);
   const [showPayResult, setShowPayResult] = useState(false);
   const { initPaySheet, tyroError, payRequest, isSubmitting, hasPayRequestCompleted, submitPayForm } = useTyro();
 
   const fetchPayRequest = async (): Promise<void> => {
-    const { paySecret } = await genNewPayRequest();
+    let paySecret;
+    if (passPaySecret) {
+      paySecret = { paySecret } = await genNewPayRequest();
+    }
     try {
       await initPaySheet(paySecret);
     } catch (error) {
@@ -76,7 +83,11 @@ export const InitTestComponent = (): JSX.Element => {
   );
 };
 
-export const TestPayButton = (): JSX.Element => {
+type testPayButtonProps = {
+  title: string;
+};
+
+export const TestPayButton = ({ title }: testPayButtonProps): JSX.Element => {
   const { tyroError, isSubmitting, submitPayForm } = useTyro();
   return (
     <View>
@@ -91,7 +102,7 @@ export const TestPayButton = (): JSX.Element => {
           accessibilityLabel="Submit the Pay Form"
           testID="pay-button"
         >
-          <Text style={styles.buttonText}>{'Pay'}</Text>
+          <Text style={styles.buttonText}>{title}</Text>
         </TouchableOpacity>
       )}
       <Text>{tyroError ? tyroError.errorType + ': ' + tyroError.errorMessage : 'no error'}</Text>

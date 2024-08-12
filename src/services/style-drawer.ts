@@ -125,6 +125,7 @@ export const getInputStyles = (
     ...getStylePropOrDefault(styleProps, 'borderRadius', TyroPayStylePropKeys.inputBorderRadius, 8),
     height: 48,
     width: 'auto',
+    minHeight: 38,
   },
   textInput: {
     ...getStylePropOrDefault(styleProps, 'fontFamily', TyroPayStylePropKeys.fontFamily, undefined),
